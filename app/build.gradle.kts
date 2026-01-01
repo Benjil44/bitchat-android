@@ -3,7 +3,8 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.parcelize)
     alias(libs.plugins.kotlin.compose)
-    id("com.google.devtools.ksp") version "2.2.0-1.0.29"
+    // TODO: Re-enable KSP when Kotlin 2.2.0 compatible version is available
+    // alias(libs.plugins.ksp)
 }
 
 android {
@@ -124,7 +125,8 @@ dependencies {
 
     // Room Database
     implementation(libs.bundles.room)
-    ksp(libs.androidx.room.compiler)
+    // TODO: Re-enable KSP annotation processing when compatible version available
+    // ksp(libs.androidx.room.compiler)
 
     // Testing
     testImplementation(libs.bundles.testing)

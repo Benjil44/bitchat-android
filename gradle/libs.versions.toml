@@ -47,6 +47,7 @@ security-crypto = "1.1.0-beta01"
 
 # Database
 room = "2.6.1"
+ksp = "2.0.21-1.0.28"
 
 # Testing
 junit = "4.13.2"
@@ -129,6 +130,7 @@ android-library = { id = "com.android.library", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-parcelize = { id = "kotlin-parcelize" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 
 [bundles]
 compose = [
