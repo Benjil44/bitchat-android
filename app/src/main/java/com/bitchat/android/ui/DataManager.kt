@@ -247,7 +247,43 @@ class DataManager(private val context: Context) {
     fun isGeohashUserBlocked(pubkeyHex: String): Boolean {
         return _geohashBlockedUsers.contains(pubkeyHex)
     }
-    
+
+    // MARK: - Message Persistence Settings
+
+    /**
+     * Check if message persistence is enabled.
+     * Default: false (ephemeral storage like iOS)
+     */
+    fun isMessagePersistenceEnabled(): Boolean {
+        return prefs.getBoolean("message_persistence_enabled", false)
+    }
+
+    /**
+     * Enable or disable message persistence.
+     */
+    fun setMessagePersistence(enabled: Boolean) {
+        prefs.edit().putBoolean("message_persistence_enabled", enabled).apply()
+        Log.d(TAG, "Message persistence ${if (enabled) "enabled" else "disabled"}")
+    }
+
+    /**
+     * Get message retention period in days.
+     * Default: 30 days
+     */
+    fun getMessageRetentionDays(): Long? {
+        val days = prefs.getLong("message_retention_days", 30L)
+        return if (days > 0) days else null
+    }
+
+    /**
+     * Set message retention period in days.
+     * Messages older than this will be automatically deleted.
+     */
+    fun setMessageRetentionDays(days: Long) {
+        prefs.edit().putLong("message_retention_days", days).apply()
+        Log.d(TAG, "Message retention set to $days days")
+    }
+
     // MARK: - Emergency Clear
     
     fun clearAllData() {

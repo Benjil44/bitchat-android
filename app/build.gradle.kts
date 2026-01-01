@@ -3,6 +3,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.parcelize)
     alias(libs.plugins.kotlin.compose)
+    id("com.google.devtools.ksp") version "2.2.0-1.0.29"
 }
 
 android {
@@ -117,10 +118,14 @@ dependencies {
 
     // Security preferences
     implementation(libs.androidx.security.crypto)
-    
+
     // EXIF orientation handling for images
     implementation("androidx.exifinterface:exifinterface:1.3.7")
-    
+
+    // Room Database
+    implementation(libs.bundles.room)
+    ksp(libs.androidx.room.compiler)
+
     // Testing
     testImplementation(libs.bundles.testing)
     androidTestImplementation(platform(libs.androidx.compose.bom))
