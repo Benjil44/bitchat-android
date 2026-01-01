@@ -58,10 +58,26 @@ class PrivateChatManager(
         // Establish Noise session if needed before starting the chat
         establishNoiseSessionIfNeeded(peerID, meshService)
 
+        // Get peer nickname for consolidation
+        val peerNickname = getPeerNickname(peerID, meshService)
+
+        // Consolidate messages from all conversations with same nickname
+        if (peerNickname != peerID) { // Only if we have a real nickname (not just peer ID)
+            try {
+                consolidateMessages(peerID, peerNickname)
+                Log.d(TAG, "Consolidated messages for $peerNickname into conversation with $peerID")
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to consolidate messages: ${e.message}")
+            }
+        }
+
         // Consolidate any temporary Nostr conversation for this peer into the stable/current peerID
         try {
             consolidateNostrTempConversationIfNeeded(peerID)
         } catch (_: Exception) { }
+
+        // Sanitize the chat to ensure no duplicates
+        sanitizeChat(peerID)
 
         state.setSelectedPrivateChatPeer(peerID)
 
@@ -298,6 +314,10 @@ class PrivateChatManager(
             if (!isPeerBlocked(senderPeerID)) {
                 // Ensure chat exists
                 messageManager.initializePrivateChat(senderPeerID)
+
+                // Sanitize chat to remove any duplicates that may have been introduced
+                sanitizeChat(senderPeerID)
+
                 // Track as unread for read receipt purposes if not focused
                 if (!suppressUnread && state.getSelectedPrivateChatPeerValue() != senderPeerID) {
                     val unreadList = unreadReceivedMessages.getOrPut(senderPeerID) { mutableListOf() }
@@ -317,6 +337,9 @@ class PrivateChatManager(
         } else {
             messageManager.addPrivateMessage(inferredPeer, message)
         }
+
+        // Sanitize after adding message
+        sanitizeChat(inferredPeer)
     }
 
     /**
@@ -412,6 +435,112 @@ class PrivateChatManager(
     }
 
     // MARK: - Consolidation
+
+    /**
+     * Consolidates messages from multiple peer IDs with same nickname into a single conversation.
+     *
+     * Use case: Peer reconnects with different ephemeral peer ID but same nickname.
+     * Without consolidation, user sees two separate conversations.
+     *
+     * @param currentPeerID The primary/current peer ID to consolidate into
+     * @param peerNickname The nickname to match across different peer IDs
+     * @param persistedReadReceipts Set of message IDs that have been read (for read status preservation)
+     * @return Consolidated list of messages, deduplicated and sorted chronologically
+     */
+    fun consolidateMessages(
+        currentPeerID: String,
+        peerNickname: String,
+        persistedReadReceipts: Set<String> = emptySet()
+    ): List<BitchatMessage> {
+        Log.d(TAG, "consolidateMessages: peerID=$currentPeerID, nickname=$peerNickname")
+
+        // Find all conversations where messages involve this nickname (as sender or recipient)
+        val allChats = state.getPrivateChatsValue()
+        val relevantConversations = allChats.filter { (peerID, messages) ->
+            messages.any { msg ->
+                msg.sender == peerNickname || msg.recipientNickname == peerNickname
+            }
+        }
+
+        Log.d(TAG, "Found ${relevantConversations.size} conversations with nickname $peerNickname")
+
+        if (relevantConversations.isEmpty()) {
+            return emptyList()
+        }
+
+        // Merge all messages from these conversations
+        val allMessages = relevantConversations.values.flatten()
+
+        // Deduplicate by message ID
+        val uniqueMessages = allMessages
+            .distinctBy { it.id }
+            .sortedBy { it.timestamp }
+
+        Log.d(TAG, "Consolidated ${allMessages.size} messages into ${uniqueMessages.size} unique messages")
+
+        // Update state to use current peer ID only
+        val updatedChats = allChats.toMutableMap()
+
+        // Remove old peer ID entries (but keep current one)
+        relevantConversations.keys.forEach { oldPeerID ->
+            if (oldPeerID != currentPeerID) {
+                updatedChats.remove(oldPeerID)
+                Log.d(TAG, "Removed old conversation for peer $oldPeerID")
+            }
+        }
+
+        // Set consolidated messages under current peer ID
+        updatedChats[currentPeerID] = uniqueMessages
+        state.setPrivateChats(updatedChats)
+
+        // Update unread messages tracking
+        val unread = state.getUnreadPrivateMessagesValue().toMutableSet()
+        val hadUnread = relevantConversations.keys.any { oldPeerID ->
+            oldPeerID != currentPeerID && unread.remove(oldPeerID)
+        }
+        if (hadUnread) {
+            unread.add(currentPeerID)
+            state.setUnreadPrivateMessages(unread)
+        }
+
+        // Update read receipts tracking
+        unreadReceivedMessages.remove(currentPeerID)
+
+        Log.d(TAG, "Consolidation complete: ${uniqueMessages.size} messages under $currentPeerID")
+
+        return uniqueMessages
+    }
+
+    /**
+     * Removes duplicate messages within a conversation by message ID.
+     * Should be called after receiving new messages or after consolidation.
+     *
+     * @param peerID The peer whose conversation should be sanitized
+     */
+    fun sanitizeChat(peerID: String) {
+        val chats = state.getPrivateChatsValue()
+        val messages = chats[peerID] ?: return
+
+        val beforeCount = messages.size
+
+        // Deduplicate by message ID, preserve chronological order
+        val sanitized = messages
+            .distinctBy { it.id }
+            .sortedBy { it.timestamp }
+
+        val afterCount = sanitized.size
+
+        if (beforeCount != afterCount) {
+            Log.d(TAG, "sanitizeChat: Removed ${beforeCount - afterCount} duplicates from $peerID conversation")
+
+            // Update state with sanitized messages
+            val updatedChats = chats.toMutableMap()
+            updatedChats[peerID] = sanitized
+            state.setPrivateChats(updatedChats)
+        } else {
+            Log.d(TAG, "sanitizeChat: No duplicates found in $peerID conversation")
+        }
+    }
 
     private fun consolidateNostrTempConversationIfNeeded(targetPeerID: String) {
         // If target is a mesh/noise-based peerID, merge any messages from its temp Nostr key
