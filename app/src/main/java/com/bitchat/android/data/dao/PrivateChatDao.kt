@@ -5,6 +5,15 @@ import com.bitchat.android.data.entity.MessageEntity
 import kotlinx.coroutines.flow.Flow
 
 /**
+ * Result data class for peer message counts.
+ * Used by getMessageCountsPerPeer() query.
+ */
+data class PeerMessageCount(
+    val peerID: String,
+    val count: Int
+)
+
+/**
  * Data Access Object for private chat messages.
  *
  * Provides methods for querying, inserting, and deleting messages
@@ -151,8 +160,8 @@ interface PrivateChatDao {
      * Get message count for each peer.
      * Useful for displaying conversation list with message counts.
      *
-     * @return Map of peerID to message count
+     * @return List of PeerMessageCount containing peerID and message count
      */
     @Query("SELECT peerID, COUNT(*) as count FROM messages GROUP BY peerID")
-    suspend fun getMessageCountsPerPeer(): Map<String, Int>
+    suspend fun getMessageCountsPerPeer(): List<PeerMessageCount>
 }

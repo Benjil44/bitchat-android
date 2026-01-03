@@ -8,6 +8,11 @@ import java.security.MessageDigest
 import com.bitchat.android.mesh.BluetoothMeshService
 import java.util.*
 import android.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
 
 /**
  * Interface for Noise session operations needed by PrivateChatManager
@@ -18,6 +23,18 @@ interface NoiseSessionDelegate {
     fun initiateHandshake(peerID: String)
     fun getMyPeerID(): String
 }
+
+/**
+ * Send request for queuing
+ */
+private data class SendRequest(
+    val content: String,
+    val peerID: String,
+    val recipientNickname: String?,
+    val senderNickname: String?,
+    val myPeerID: String,
+    val onSendMessage: (String, String, String, String) -> Unit
+)
 
 /**
  * Handles private chat functionality including peer management and blocking
@@ -39,6 +56,20 @@ class PrivateChatManager(
 
     // Track received private messages that need read receipts
     private val unreadReceivedMessages = mutableMapOf<String, MutableList<BitchatMessage>>()
+
+    // Send queue to prevent race conditions on rapid send
+    private val sendQueue = Channel<SendRequest>(Channel.UNLIMITED)
+    private val sendJob = Job()
+    private val sendScope = CoroutineScope(Dispatchers.Default + sendJob)
+
+    init {
+        // Process send requests sequentially to prevent duplicates
+        sendScope.launch {
+            for (request in sendQueue) {
+                processSendRequest(request)
+            }
+        }
+    }
 
     // MARK: - Private Chat Lifecycle
 
@@ -87,6 +118,11 @@ class PrivateChatManager(
         // Initialize chat if needed
         messageManager.initializePrivateChat(peerID)
 
+        // Load persisted messages if enabled
+        CoroutineScope(Dispatchers.IO).launch {
+            messageManager.loadPersistedMessages(peerID)
+        }
+
         // Send read receipts for all unread messages from this peer
         sendReadReceiptsForPeer(peerID, meshService)
 
@@ -116,21 +152,34 @@ class PrivateChatManager(
             return false
         }
 
+        // Queue send request to prevent race conditions
+        sendScope.launch {
+            sendQueue.send(SendRequest(content, peerID, recipientNickname, senderNickname, myPeerID, onSendMessage))
+        }
+
+        return true
+    }
+
+    /**
+     * Process send request sequentially from queue
+     * Prevents duplicate messages on rapid sends
+     */
+    private fun processSendRequest(request: SendRequest) {
         val message = BitchatMessage(
-            sender = senderNickname ?: myPeerID,
-            content = content,
+            sender = request.senderNickname ?: request.myPeerID,
+            content = request.content,
             timestamp = Date(),
             isRelay = false,
             isPrivate = true,
-            recipientNickname = recipientNickname,
-            senderPeerID = myPeerID,
+            recipientNickname = request.recipientNickname,
+            senderPeerID = request.myPeerID,
             deliveryStatus = DeliveryStatus.Sending
         )
 
-        messageManager.addPrivateMessage(peerID, message)
-        onSendMessage(content, peerID, recipientNickname ?: "", message.id)
+        messageManager.addPrivateMessage(request.peerID, message)
+        request.onSendMessage(request.content, request.peerID, request.recipientNickname ?: "", message.id)
 
-        return true
+        Log.d(TAG, "Processed send request: ${message.id} to ${request.peerID}")
     }
 
     // MARK: - Peer Management
@@ -609,6 +658,15 @@ class PrivateChatManager(
 
         // Clear fingerprints via centralized manager (only if needed for emergency clear)
         // Note: This will be handled by the parent PeerManager.clearAllPeers()
+    }
+
+    /**
+     * Shutdown manager and clean up resources
+     * Call this when the manager is no longer needed
+     */
+    fun shutdown() {
+        sendJob.cancel()
+        Log.d(TAG, "PrivateChatManager shut down")
     }
 
     // MARK: - Public Getters

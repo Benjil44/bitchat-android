@@ -3,8 +3,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.parcelize)
     alias(libs.plugins.kotlin.compose)
-    // TODO: Re-enable KSP when Kotlin 2.2.0 compatible version is available
-    // alias(libs.plugins.ksp)
+    alias(libs.plugins.ksp)
 }
 
 android {
@@ -15,8 +14,8 @@ android {
         applicationId = "com.bitchat.droid"
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
-        versionCode = 27
-        versionName = "1.6.0"
+        versionCode = 30
+        versionName = "1.8.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -125,8 +124,14 @@ dependencies {
 
     // Room Database
     implementation(libs.bundles.room)
-    // TODO: Re-enable KSP annotation processing when compatible version available
-    // ksp(libs.androidx.room.compiler)
+    ksp(libs.androidx.room.compiler)
+
+    // SQLCipher for encrypted database
+    implementation(libs.sqlcipher.android)
+
+    // QR Code generation and scanning
+    implementation("com.google.zxing:core:3.5.3")
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
 
     // Testing
     testImplementation(libs.bundles.testing)

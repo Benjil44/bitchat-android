@@ -15,11 +15,16 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.QrCode
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -123,6 +128,70 @@ private fun ThemeChip(
 }
 
 /**
+ * Settings button row for navigation (similar to SettingsToggleRow but for buttons)
+ */
+@Composable
+private fun SettingsButtonRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+    enabled: Boolean = true
+) {
+    val colorScheme = MaterialTheme.colorScheme
+
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        color = Color.Transparent,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = if (enabled) colorScheme.primary else colorScheme.onSurface.copy(alpha = 0.3f),
+                modifier = Modifier.size(22.dp)
+            )
+
+            Spacer(modifier = Modifier.width(14.dp))
+
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = if (enabled) colorScheme.onSurface else colorScheme.onSurface.copy(alpha = 0.4f)
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colorScheme.onSurface.copy(alpha = if (enabled) 0.6f else 0.3f),
+                    lineHeight = 16.sp
+                )
+            }
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            Icon(
+                imageVector = Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = colorScheme.onSurface.copy(alpha = 0.3f),
+                modifier = Modifier.size(20.dp)
+            )
+        }
+    }
+}
+
+/**
  * Unified settings toggle row with icon, title, subtitle, and switch
  * Apple-like design with proper spacing
  */
@@ -204,6 +273,9 @@ fun AboutSheet(
     isPresented: Boolean,
     onDismiss: () -> Unit,
     onShowDebug: (() -> Unit)? = null,
+    onShowContactList: (() -> Unit)? = null,
+    onShowAddFriend: (() -> Unit)? = null,
+    onShowMyQRCode: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -463,6 +535,121 @@ fun AboutSheet(
                                             }
                                         } else null
                                     )
+
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(start = 56.dp),
+                                        color = colorScheme.outline.copy(alpha = 0.12f)
+                                    )
+
+                                    // Contact Filtering Toggle
+                                    val dataManager = remember { DataManager(context) }
+                                    var showContactsOnly by remember { mutableStateOf(dataManager.isShowContactsOnly()) }
+
+                                    SettingsToggleRow(
+                                        icon = Icons.Filled.People,
+                                        title = "Contact Filtering",
+                                        subtitle = "Only show messages from trusted contacts",
+                                        checked = showContactsOnly,
+                                        onCheckedChange = { enabled ->
+                                            showContactsOnly = enabled
+                                            dataManager.setShowContactsOnly(enabled)
+                                        }
+                                    )
+
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(start = 56.dp),
+                                        color = colorScheme.outline.copy(alpha = 0.12f)
+                                    )
+
+                                    // WiFi Direct Toggle (Extended Range)
+                                    var wifiDirectEnabled by remember {
+                                        mutableStateOf(com.bitchat.android.wifidirect.WiFiDirectPreferences.isEnabled(context))
+                                    }
+                                    val wifiPermissionManager = remember {
+                                        com.bitchat.android.wifidirect.WiFiDirectPermissionManager(context)
+                                    }
+                                    var hasWifiPermissions by remember {
+                                        mutableStateOf(wifiPermissionManager.hasAllPermissions())
+                                    }
+                                    val wifiAvailable = remember {
+                                        wifiPermissionManager.isWiFiDirectAvailable()
+                                    }
+
+                                    // Get WiFi Direct service for connection status
+                                    val meshService = remember {
+                                        try {
+                                            com.bitchat.android.service.MeshServiceHolder.getOrCreate(context.applicationContext)
+                                        } catch (e: Exception) {
+                                            null
+                                        }
+                                    }
+                                    val wifiConnectionInfo by (meshService?.wifiDirectService?.connectionInfo?.collectAsState() ?: remember { mutableStateOf(null) })
+                                    val wifiIsConnected by (meshService?.wifiDirectService?.isConnected?.collectAsState() ?: remember { mutableStateOf(false) })
+                                    val wifiPeers by (meshService?.wifiDirectService?.peers?.collectAsState() ?: remember { mutableStateOf(emptyList()) })
+                                    val connectedPeerCount = wifiPeers.count { it.isConnected }
+
+                                    SettingsToggleRow(
+                                        icon = Icons.Default.NetworkCheck,
+                                        title = "WiFi Direct",
+                                        subtitle = when {
+                                            !wifiDirectEnabled -> "Extended range: 100-200m vs 10-30m Bluetooth"
+                                            !hasWifiPermissions -> "Tap to grant permissions (required for 100-200m range)"
+                                            wifiIsConnected && connectedPeerCount > 0 -> "Connected to $connectedPeerCount peer${if (connectedPeerCount > 1) "s" else ""}"
+                                            wifiIsConnected -> "Connected as ${if (wifiConnectionInfo?.isGroupOwner == true) "Group Owner" else "Client"}"
+                                            else -> "Discovering peers..."
+                                        },
+                                        checked = wifiDirectEnabled,
+                                        onCheckedChange = { enabled ->
+                                            wifiDirectEnabled = enabled
+                                            com.bitchat.android.wifidirect.WiFiDirectPreferences.setEnabled(context, enabled)
+
+                                            // Request permissions if WiFi Direct enabled but permissions missing
+                                            if (enabled && !hasWifiPermissions) {
+                                                (context as? com.bitchat.android.MainActivity)?.requestWiFiDirectPermissions()
+                                            }
+                                            // Note: Actual WiFi Direct enable/disable happens in MeshForegroundService
+                                        },
+                                        enabled = wifiAvailable,
+                                        statusIndicator = if (wifiDirectEnabled) {
+                                            {
+                                                val statusColor = when {
+                                                    !hasWifiPermissions -> Color(0xFFFF3B30) // Red for no permissions
+                                                    wifiIsConnected -> if (isDark) Color(0xFF32D74B) else Color(0xFF248A3D) // Green for connected
+                                                    else -> Color(0xFFFF9500) // Orange for discovering
+                                                }
+                                                Surface(
+                                                    color = statusColor,
+                                                    shape = CircleShape,
+                                                    modifier = Modifier.size(8.dp)
+                                                ) {}
+                                            }
+                                        } else null
+                                    )
+
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(start = 56.dp),
+                                        color = colorScheme.outline.copy(alpha = 0.12f)
+                                    )
+
+                                    // Persistent Message History Toggle
+                                    var persistentStorageEnabled by remember {
+                                        mutableStateOf(com.bitchat.android.data.StoragePreferences.isEnabled(context))
+                                    }
+
+                                    SettingsToggleRow(
+                                        icon = Icons.Filled.People,
+                                        title = "Message History",
+                                        subtitle = if (persistentStorageEnabled) {
+                                            "Messages saved (30 days, 1000 per chat)"
+                                        } else {
+                                            "Messages deleted on close (privacy mode)"
+                                        },
+                                        checked = persistentStorageEnabled,
+                                        onCheckedChange = { enabled ->
+                                            persistentStorageEnabled = enabled
+                                            com.bitchat.android.data.StoragePreferences.setEnabled(context, enabled)
+                                        }
+                                    )
                                 }
                             }
                             
@@ -591,6 +778,310 @@ fun AboutSheet(
                                     }
                                 }
                             }
+                        }
+                    }
+
+                    // Contacts Section
+                    if (onShowContactList != null || onShowAddFriend != null || onShowMyQRCode != null) {
+                        item(key = "contacts") {
+                            Column(modifier = Modifier.padding(horizontal = 20.dp)) {
+                                Text(
+                                    text = "CONTACTS",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = colorScheme.onBackground.copy(alpha = 0.5f),
+                                    letterSpacing = 0.5.sp,
+                                    modifier = Modifier.padding(start = 16.dp, bottom = 8.dp)
+                                )
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    color = colorScheme.surface,
+                                    shape = RoundedCornerShape(16.dp)
+                                ) {
+                                    Column {
+                                        if (onShowContactList != null) {
+                                            SettingsButtonRow(
+                                                icon = Icons.Default.People,
+                                                title = "Manage Contacts",
+                                                subtitle = "View and organize your trusted contacts",
+                                                onClick = onShowContactList
+                                            )
+                                        }
+
+                                        if (onShowContactList != null && onShowMyQRCode != null) {
+                                            HorizontalDivider(
+                                                modifier = Modifier.padding(start = 56.dp),
+                                                color = colorScheme.outline.copy(alpha = 0.12f)
+                                            )
+                                        }
+
+                                        if (onShowMyQRCode != null) {
+                                            SettingsButtonRow(
+                                                icon = Icons.Default.QrCode,
+                                                title = "My QR Code",
+                                                subtitle = "Share your Hash ID with friends",
+                                                onClick = onShowMyQRCode
+                                            )
+                                        }
+
+                                        if (onShowMyQRCode != null && onShowAddFriend != null) {
+                                            HorizontalDivider(
+                                                modifier = Modifier.padding(start = 56.dp),
+                                                color = colorScheme.outline.copy(alpha = 0.12f)
+                                            )
+                                        }
+
+                                        if (onShowAddFriend != null) {
+                                            SettingsButtonRow(
+                                                icon = Icons.Default.PersonAdd,
+                                                title = "Add Friend",
+                                                subtitle = "Add a new contact by Hash ID or QR code",
+                                                onClick = onShowAddFriend
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Emergency Data Deletion Section
+                    item(key = "emergency") {
+                        var showPanicDialog by remember { mutableStateOf(false) }
+                        var showWipeResult by remember { mutableStateOf(false) }
+                        var wipeResult by remember { mutableStateOf<com.bitchat.android.emergency.EmergencyDataWiper.WipeResult?>(null) }
+                        val scope = rememberCoroutineScope()
+
+                        Column(modifier = Modifier.padding(horizontal = 20.dp)) {
+                            Text(
+                                text = "EMERGENCY",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colorScheme.error.copy(alpha = 0.8f),
+                                letterSpacing = 0.5.sp,
+                                modifier = Modifier.padding(start = 16.dp, bottom = 8.dp)
+                            )
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                color = colorScheme.errorContainer.copy(alpha = 0.3f),
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
+                                Column {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Warning,
+                                            contentDescription = null,
+                                            tint = colorScheme.error,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+
+                                        Spacer(modifier = Modifier.width(14.dp))
+
+                                        Column(
+                                            modifier = Modifier.weight(1f),
+                                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                                        ) {
+                                            Text(
+                                                text = "Panic Button",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = colorScheme.error
+                                            )
+                                            Text(
+                                                text = "Delete all data immediately (messages, contacts, settings)",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = colorScheme.onSurface.copy(alpha = 0.7f),
+                                                lineHeight = 16.sp
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.width(12.dp))
+
+                                        Button(
+                                            onClick = { showPanicDialog = true },
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = colorScheme.error,
+                                                contentColor = Color.White
+                                            ),
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Text(
+                                                text = "WIPE",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.sp
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Confirmation Dialog
+                        if (showPanicDialog) {
+                            AlertDialog(
+                                onDismissRequest = { showPanicDialog = false },
+                                title = {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Warning,
+                                            contentDescription = null,
+                                            tint = colorScheme.error,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                        Text(
+                                            text = "Emergency Data Wipe?",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = colorScheme.error,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                },
+                                text = {
+                                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                        Text(
+                                            text = "This will PERMANENTLY delete:",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = colorScheme.onSurface
+                                        )
+                                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            Text("• All messages (sent and received)", fontSize = 14.sp)
+                                            Text("• All contacts and Hash IDs", fontSize = 14.sp)
+                                            Text("• All settings and preferences", fontSize = 14.sp)
+                                            Text("• Encryption keys", fontSize = 14.sp)
+                                            Text("• All cached data", fontSize = 14.sp)
+                                        }
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = "⚠️ This action CANNOT be undone!",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = colorScheme.error
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = "Use this if your phone is about to be seized. After deletion, you can manually uninstall the app from Settings.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = colorScheme.onSurface.copy(alpha = 0.7f),
+                                            fontSize = 12.sp
+                                        )
+                                    }
+                                },
+                                confirmButton = {
+                                    Button(
+                                        onClick = {
+                                            showPanicDialog = false
+                                            scope.launch {
+                                                val result = com.bitchat.android.emergency.EmergencyDataWiper.wipeAllData(context)
+                                                wipeResult = result
+                                                showWipeResult = true
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = colorScheme.error,
+                                            contentColor = Color.White
+                                        )
+                                    ) {
+                                        Text(
+                                            "DELETE ALL DATA",
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                },
+                                dismissButton = {
+                                    TextButton(onClick = { showPanicDialog = false }) {
+                                        Text("Cancel", color = colorScheme.onSurface)
+                                    }
+                                },
+                                containerColor = colorScheme.surface,
+                                tonalElevation = 8.dp
+                            )
+                        }
+
+                        // Wipe Result Dialog
+                        if (showWipeResult && wipeResult != null) {
+                            AlertDialog(
+                                onDismissRequest = { showWipeResult = false },
+                                title = {
+                                    Text(
+                                        text = if (wipeResult!!.success) "✅ Data Deleted" else "⚠️ Partial Deletion",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = if (wipeResult!!.success) colorScheme.primary else colorScheme.error
+                                    )
+                                },
+                                text = {
+                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Text(
+                                            text = "Deletion completed in ${wipeResult!!.durationMs}ms",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+
+                                        if (wipeResult!!.deletedItems.isNotEmpty()) {
+                                            Text(
+                                                text = "Deleted (${wipeResult!!.deletedItems.size} items):",
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                modifier = Modifier.padding(top = 8.dp)
+                                            )
+                                            wipeResult!!.deletedItems.forEach { item ->
+                                                Text("• $item", fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                                            }
+                                        }
+
+                                        if (wipeResult!!.errors.isNotEmpty()) {
+                                            Text(
+                                                text = "Errors (${wipeResult!!.errors.size}):",
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = colorScheme.error,
+                                                modifier = Modifier.padding(top = 8.dp)
+                                            )
+                                            wipeResult!!.errors.forEach { error ->
+                                                Text("• $error", fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = colorScheme.error)
+                                            }
+                                        }
+
+                                        if (wipeResult!!.success) {
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Text(
+                                                text = "Your data has been deleted. You can now uninstall the app from Settings → Apps if needed.",
+                                                fontSize = 12.sp,
+                                                color = colorScheme.onSurface.copy(alpha = 0.7f)
+                                            )
+                                        }
+                                    }
+                                },
+                                confirmButton = {
+                                    if (wipeResult!!.success) {
+                                        Button(
+                                            onClick = {
+                                                com.bitchat.android.emergency.EmergencyDataWiper.openAppSettings(context)
+                                                showWipeResult = false
+                                            }
+                                        ) {
+                                            Text("Open App Settings")
+                                        }
+                                    } else {
+                                        Button(onClick = { showWipeResult = false }) {
+                                            Text("OK")
+                                        }
+                                    }
+                                },
+                                dismissButton = {
+                                    TextButton(onClick = { showWipeResult = false }) {
+                                        Text("Close")
+                                    }
+                                },
+                                containerColor = colorScheme.surface,
+                                tonalElevation = 8.dp
+                            )
                         }
                     }
 

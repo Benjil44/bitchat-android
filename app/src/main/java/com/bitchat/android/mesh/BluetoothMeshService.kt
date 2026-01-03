@@ -52,6 +52,14 @@ class BluetoothMeshService(private val context: Context) {
     internal val connectionManager = BluetoothConnectionManager(context, myPeerID, fragmentManager) // Made internal for access
     private val packetProcessor = PacketProcessor(myPeerID)
     private lateinit var gossipSyncManager: GossipSyncManager
+
+    // WiFi Direct components (100-200m range extension)
+    val wifiDirectService = com.bitchat.android.wifidirect.WiFiDirectService(context)
+    private val transportRouter = com.bitchat.android.transport.TransportRouter(context)
+    private val wifiPermissionManager = com.bitchat.android.wifidirect.WiFiDirectPermissionManager(context)
+
+    // WiFi Direct state
+    private var isWiFiDirectEnabled = false
     // Service-level notification manager for background (no-UI) DMs
     private val serviceNotificationManager = com.bitchat.android.ui.NotificationManager(
         context.applicationContext,
@@ -107,7 +115,24 @@ class BluetoothMeshService(private val context: Context) {
                 return signPacketBeforeBroadcast(packet)
             }
         }
-        Log.d(TAG, "Delegates set up; GossipSyncManager initialized")
+
+        // Wire WiFi Direct delegate for packet reception
+        wifiDirectService.delegate = object : com.bitchat.android.wifidirect.WiFiDirectServiceDelegate {
+            override fun onPacketReceived(packet: BitchatPacket, fromAddress: String) {
+                Log.d(TAG, "📶 Received WiFi Direct packet from $fromAddress (type: ${packet.type})")
+
+                // Find peer ID for this device address
+                // First check if we know this peer from WiFi Direct peers list
+                val peerID = wifiDirectService.peers.value
+                    .find { it.deviceAddress == fromAddress }
+                    ?.deviceAddress ?: fromAddress // Use device address as peerID if not found
+
+                // Forward to packet processor (same flow as Bluetooth packets)
+                packetProcessor.processPacket(RoutedPacket(packet, peerID, fromAddress))
+            }
+        }
+
+        Log.d(TAG, "Delegates set up; GossipSyncManager and WiFi Direct initialized")
     }
     
     /**
@@ -146,6 +171,53 @@ class BluetoothMeshService(private val context: Context) {
                 }
             }
             Log.d(TAG, "Periodic announce loop ended (isActive=$isActive)")
+        }
+    }
+
+    /**
+     * Periodically check for sessions needing rekey (every 5 minutes)
+     * Maintains forward secrecy by rotating session keys
+     */
+    private fun startPeriodicSessionRekey() {
+        serviceScope.launch {
+            Log.d(TAG, "Starting periodic session rekey checker")
+            while (isActive) {
+                try {
+                    delay(300000) // 5 minutes
+                    val sessionsNeedingRekey = encryptionService.getSessionsNeedingRekey()
+                    if (sessionsNeedingRekey.isNotEmpty()) {
+                        Log.i(TAG, "🔄 Found ${sessionsNeedingRekey.size} sessions needing rekey")
+                        sessionsNeedingRekey.forEach { peerID ->
+                            try {
+                                val handshakeData = encryptionService.initiateRekey(peerID)
+                                if (handshakeData != null) {
+                                    // Send new handshake packet to peer
+                                    val packet = BitchatPacket(
+                                        version = 1u,
+                                        type = MessageType.NOISE_HANDSHAKE.value,
+                                        senderID = hexStringToByteArray(myPeerID),
+                                        recipientID = hexStringToByteArray(peerID),
+                                        timestamp = System.currentTimeMillis().toULong(),
+                                        payload = handshakeData,
+                                        ttl = MAX_TTL
+                                    )
+
+                                    val signedPacket = signPacketBeforeBroadcast(packet)
+                                    connectionManager.broadcastPacket(RoutedPacket(signedPacket))
+                                    Log.i(TAG, "🔄 Initiated rekey for session with $peerID")
+                                } else {
+                                    Log.w(TAG, "Failed to initiate rekey for $peerID (no handshake data)")
+                                }
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error initiating rekey for $peerID: ${e.message}")
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error in periodic session rekey: ${e.message}")
+                }
+            }
+            Log.d(TAG, "Periodic session rekey checker ended (isActive=$isActive)")
         }
     }
     
@@ -600,18 +672,32 @@ class BluetoothMeshService(private val context: Context) {
             Log.e(TAG, "Mesh service instance was terminated; create a new instance instead of restarting")
             return
         }
-        
+
         Log.i(TAG, "Starting Bluetooth mesh service with peer ID: $myPeerID")
-        
+
         if (connectionManager.startServices()) {
             isActive = true
-            
+
             // Start periodic announcements for peer discovery and connectivity
             sendPeriodicBroadcastAnnounce()
             Log.d(TAG, "Started periodic broadcast announcements (every 30 seconds)")
+
+            // Start periodic session rekeying for forward secrecy
+            startPeriodicSessionRekey()
+            Log.d(TAG, "Started periodic session rekey checker (every 5 minutes)")
+
             // Start periodic syncs
             gossipSyncManager.start()
             Log.d(TAG, "GossipSyncManager started")
+
+            // Start WiFi Direct if enabled and permissions granted
+            if (isWiFiDirectEnabled && wifiPermissionManager.hasAllPermissions()) {
+                Log.i(TAG, "Starting WiFi Direct service (100-200m range)")
+                wifiDirectService.start()
+            } else if (isWiFiDirectEnabled) {
+                Log.w(TAG, "WiFi Direct enabled but permissions not granted")
+                // User needs to grant permissions via Settings UI
+            }
         } else {
             Log.e(TAG, "Failed to start Bluetooth services")
         }
@@ -625,17 +711,23 @@ class BluetoothMeshService(private val context: Context) {
             Log.w(TAG, "Mesh service not active, ignoring stop request")
             return
         }
-        
+
         Log.i(TAG, "Stopping Bluetooth mesh service")
         isActive = false
-        
+
         // Send leave announcement
         sendLeaveAnnouncement()
-        
+
+        // Stop WiFi Direct
+        if (isWiFiDirectEnabled) {
+            Log.i(TAG, "Stopping WiFi Direct service")
+            wifiDirectService.stop()
+        }
+
         serviceScope.launch {
             Log.d(TAG, "Stopping subcomponents and cancelling scope...")
             delay(200) // Give leave message time to send
-            
+
             // Stop all components
             gossipSyncManager.stop()
             Log.d(TAG, "GossipSyncManager stopped")
@@ -647,7 +739,7 @@ class BluetoothMeshService(private val context: Context) {
             storeForwardManager.shutdown()
             messageHandler.shutdown()
             packetProcessor.shutdown()
-            
+
             // Mark this instance as terminated and cancel its scope so it won't be reused
             terminated = true
             serviceScope.cancel()
@@ -666,13 +758,48 @@ class BluetoothMeshService(private val context: Context) {
         }
         return reusable
     }
+
+    /**
+     * Enable or disable WiFi Direct (100-200m range)
+     * Call from Settings UI
+     *
+     * @param enabled true to enable WiFi Direct, false to disable
+     */
+    fun setWiFiDirectEnabled(enabled: Boolean) {
+        isWiFiDirectEnabled = enabled
+
+        if (enabled) {
+            if (wifiPermissionManager.hasAllPermissions()) {
+                wifiDirectService.start()
+                Log.i(TAG, "WiFi Direct enabled (100-200m range)")
+            } else {
+                Log.w(TAG, "WiFi Direct enabled but missing permissions")
+                // Notify delegate to request permissions
+                delegate?.onWiFiDirectPermissionsRequired()
+            }
+        } else {
+            wifiDirectService.stop()
+            Log.i(TAG, "WiFi Direct disabled")
+        }
+    }
+
+    /**
+     * Check if WiFi Direct is currently enabled
+     */
+    fun isWiFiDirectEnabled(): Boolean = isWiFiDirectEnabled
+
+    /**
+     * Check if all WiFi Direct permissions are granted
+     */
+    fun hasWiFiDirectPermissions(): Boolean = wifiPermissionManager.hasAllPermissions()
     
     /**
-     * Send public message
+     * Send public message (broadcast to all peers)
+     * Uses hybrid transport when WiFi Direct enabled
      */
     fun sendMessage(content: String, mentions: List<String> = emptyList(), channel: String? = null) {
         if (content.isEmpty()) return
-        
+
         serviceScope.launch {
             val packet = BitchatPacket(
                 version = 1u,
@@ -687,7 +814,26 @@ class BluetoothMeshService(private val context: Context) {
 
             // Sign the packet before broadcasting
             val signedPacket = signPacketBeforeBroadcast(packet)
+
+            // Broadcast via Bluetooth (always)
             connectionManager.broadcastPacket(RoutedPacket(signedPacket))
+
+            // If WiFi Direct enabled, also broadcast via WiFi Direct for extended range
+            if (isWiFiDirectEnabled) {
+                try {
+                    val wifiPeers = wifiDirectService.peers.value
+                    if (wifiPeers.isNotEmpty()) {
+                        Log.d(TAG, "📶 Broadcasting to ${wifiPeers.size} WiFi Direct peers")
+                        // Send to each WiFi Direct peer (broadcast)
+                        wifiPeers.forEach { wifiPeer ->
+                            wifiDirectService.sendPacket(wifiPeer.deviceAddress, signedPacket)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to broadcast via WiFi Direct: ${e.message}")
+                }
+            }
+
             // Track our own broadcast message for sync
             try { gossipSyncManager.onPublicPacketSeen(signedPacket) } catch (_: Exception) { }
         }
@@ -807,18 +953,18 @@ class BluetoothMeshService(private val context: Context) {
     } catch (_: Exception) { bytes.size.toString(16) }
     
     /**
-     * Send private message - SIMPLIFIED iOS-compatible version 
+     * Send private message - HYBRID transport version with WiFi Direct support
      * Uses NoisePayloadType system exactly like iOS SimplifiedBluetoothService
      */
     fun sendPrivateMessage(content: String, recipientPeerID: String, recipientNickname: String, messageID: String? = null) {
         if (content.isEmpty() || recipientPeerID.isEmpty()) return
         if (recipientNickname.isEmpty()) return
-        
+
         serviceScope.launch {
             val finalMessageID = messageID ?: java.util.UUID.randomUUID().toString()
-            
+
             Log.d(TAG, "📨 Sending PM to $recipientPeerID: ${content.take(30)}...")
-            
+
             // Check if we have an established Noise session
             if (encryptionService.hasEstablishedSession(recipientPeerID)) {
                 try {
@@ -827,22 +973,22 @@ class BluetoothMeshService(private val context: Context) {
                         messageID = finalMessageID,
                         content = content
                     )
-                    
+
                     val tlvData = privateMessage.encode()
                     if (tlvData == null) {
                         Log.e(TAG, "Failed to encode private message with TLV")
                         return@launch
                     }
-                    
+
                     // Create message payload with NoisePayloadType prefix: [type byte] + [TLV data]
                     val messagePayload = com.bitchat.android.model.NoisePayload(
                         type = com.bitchat.android.model.NoisePayloadType.PRIVATE_MESSAGE,
                         data = tlvData
                     )
-                    
+
                     // Encrypt the payload
                     val encrypted = encryptionService.encrypt(messagePayload.encode(), recipientPeerID)
-                    
+
                     // Create NOISE_ENCRYPTED packet exactly like iOS
                     val packet = BitchatPacket(
                         version = 1u,
@@ -854,16 +1000,20 @@ class BluetoothMeshService(private val context: Context) {
                         signature = null,
                         ttl = MAX_TTL
                     )
-                    
+
                     // Sign the packet before broadcasting
                     val signedPacket = signPacketBeforeBroadcast(packet)
-                    connectionManager.broadcastPacket(RoutedPacket(signedPacket))
+
+                    // HYBRID TRANSPORT: Use TransportRouter if WiFi Direct enabled
+                    if (isWiFiDirectEnabled) {
+                        sendPacketViaHybridTransport(recipientPeerID, signedPacket)
+                    } else {
+                        // Bluetooth only (legacy mode)
+                        connectionManager.broadcastPacket(RoutedPacket(signedPacket))
+                    }
+
                     Log.d(TAG, "📤 Sent encrypted private message to $recipientPeerID (${encrypted.size} bytes)")
-                    
-                    // FIXED: Don't send didReceiveMessage for our own sent messages
-                    // This was causing self-notifications - iOS doesn't do this
-                    // The UI handles showing sent messages through its own message sending logic
-                    
+
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to encrypt private message for $recipientPeerID: ${e.message}")
                 }
@@ -871,10 +1021,60 @@ class BluetoothMeshService(private val context: Context) {
                 // Fire and forget - initiate handshake but don't queue exactly like iOS
                 Log.d(TAG, "🤝 No session with $recipientPeerID, initiating handshake")
                 messageHandler.delegate?.initiateNoiseHandshake(recipientPeerID)
-                
-                // FIXED: Don't send didReceiveMessage for our own sent messages
-                // The UI will handle showing the message in the chat interface
             }
+        }
+    }
+
+    /**
+     * Send packet using hybrid transport (WiFi Direct + Bluetooth)
+     * Intelligently selects best transport based on distance, battery, packet size
+     */
+    private suspend fun sendPacketViaHybridTransport(peerID: String, packet: BitchatPacket) {
+        // Get Bluetooth peer info
+        val bluetoothPeers = getBluetoothPeerInfo()
+
+        // Get WiFi Direct peers
+        val wifiDirectPeers = wifiDirectService.peers.value
+
+        // Use TransportRouter to select best transport
+        val transport = transportRouter.selectTransport(
+            peerID = peerID,
+            packet = packet,
+            bluetoothPeers = bluetoothPeers,
+            wifiDirectPeers = wifiDirectPeers
+        )
+
+        // Send via selected transport
+        when (transport) {
+            com.bitchat.android.transport.TransportType.BLUETOOTH -> {
+                Log.d(TAG, "🔵 Using Bluetooth for $peerID")
+                connectionManager.broadcastPacket(RoutedPacket(packet))
+            }
+            com.bitchat.android.transport.TransportType.WIFI_DIRECT -> {
+                Log.d(TAG, "📶 Using WiFi Direct for $peerID")
+                val success = wifiDirectService.sendPacket(peerID, packet)
+                if (!success) {
+                    // Fallback to Bluetooth
+                    Log.w(TAG, "WiFi Direct send failed, falling back to Bluetooth")
+                    connectionManager.broadcastPacket(RoutedPacket(packet))
+                }
+            }
+        }
+    }
+
+    /**
+     * Convert PeerManager peers to BluetoothPeerInfo for TransportRouter
+     */
+    private fun getBluetoothPeerInfo(): List<com.bitchat.android.transport.BluetoothPeerInfo> {
+        val peerNicknames = peerManager.getAllPeerNicknames()
+        val peerRSSI = peerManager.getAllPeerRSSI()
+
+        return peerNicknames.keys.map { peerID ->
+            com.bitchat.android.transport.BluetoothPeerInfo(
+                peerID = peerID,
+                rssi = peerRSSI[peerID] ?: -100, // Default to very weak signal if unknown
+                lastSeen = System.currentTimeMillis() // PeerManager doesn't expose lastSeen, use current time
+            )
         }
     }
     
@@ -1286,5 +1486,14 @@ interface BluetoothMeshDelegate {
     fun decryptChannelMessage(encryptedContent: ByteArray, channel: String): String?
     fun getNickname(): String?
     fun isFavorite(peerID: String): Boolean
+
+    /**
+     * Called when WiFi Direct needs permissions
+     * Delegate should trigger permission request in Activity
+     */
+    fun onWiFiDirectPermissionsRequired() {
+        // Default empty implementation for backward compatibility
+    }
+
     // registerPeerPublicKey REMOVED - fingerprints now handled centrally in PeerManager
 }

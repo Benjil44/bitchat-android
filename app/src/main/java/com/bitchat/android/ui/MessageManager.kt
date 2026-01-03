@@ -1,14 +1,29 @@
 package com.bitchat.android.ui
 
+import android.content.Context
+import com.bitchat.android.data.StoragePreferences
+import com.bitchat.android.data.repository.MessageRepository
 import com.bitchat.android.model.BitchatMessage
 import com.bitchat.android.model.DeliveryStatus
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.util.*
 import java.util.Collections
 
 /**
  * Handles all message-related operations including deduplication and organization
+ * Now with optional persistent storage support via Room Database
  */
-class MessageManager(private val state: ChatState) {
+class MessageManager(
+    private val state: ChatState,
+    private val context: Context? = null  // Optional for backward compatibility
+) {
+
+    // Persistent storage (lazy initialization)
+    private val messageRepository by lazy {
+        context?.let { MessageRepository.getInstance(it) }
+    }
     
     // Message deduplication - FIXED: Prevent duplicate messages from dual connection paths
     private val processedUIMessages = Collections.synchronizedSet(mutableSetOf<String>())
@@ -104,14 +119,21 @@ class MessageManager(private val state: ChatState) {
         if (!currentPrivateChats.containsKey(peerID)) {
             currentPrivateChats[peerID] = mutableListOf()
         }
-        
+
         val chatMessages = currentPrivateChats[peerID]?.toMutableList() ?: mutableListOf()
         chatMessages.add(message)
         currentPrivateChats[peerID] = chatMessages
         state.setPrivateChats(currentPrivateChats)
         // Reflect into process-wide store
         try { com.bitchat.android.services.AppStateStore.addPrivateMessage(peerID, message) } catch (_: Exception) { }
-        
+
+        // Save to persistent storage if enabled
+        if (context != null && StoragePreferences.isEnabled(context)) {
+            CoroutineScope(Dispatchers.IO).launch {
+                messageRepository?.saveMessage(message, peerID)
+            }
+        }
+
         // Mark as unread if not currently viewing this chat
         if (state.getSelectedPrivateChatPeerValue() != peerID && message.sender != state.getNicknameValue()) {
             val currentUnread = state.getUnreadPrivateMessagesValue().toMutableSet()
@@ -132,6 +154,29 @@ class MessageManager(private val state: ChatState) {
         state.setPrivateChats(currentPrivateChats)
         // Reflect into process-wide store
         try { com.bitchat.android.services.AppStateStore.addPrivateMessage(peerID, message) } catch (_: Exception) { }
+
+        // Save to persistent storage if enabled
+        if (context != null && StoragePreferences.isEnabled(context)) {
+            CoroutineScope(Dispatchers.IO).launch {
+                messageRepository?.saveMessage(message, peerID)
+            }
+        }
+    }
+
+    /**
+     * Load persisted messages for a conversation
+     * Call this when opening a private chat
+     */
+    suspend fun loadPersistedMessages(peerID: String) {
+        if (context == null || !StoragePreferences.isEnabled(context)) return
+
+        val messages = messageRepository?.loadMessages(peerID) ?: emptyList()
+        if (messages.isNotEmpty()) {
+            val updatedChats = state.getPrivateChatsValue().toMutableMap()
+            updatedChats[peerID] = messages
+            state.setPrivateChats(updatedChats)
+            android.util.Log.d("MessageManager", "✅ Loaded ${messages.size} persisted messages for $peerID")
+        }
     }
     
     fun clearPrivateMessages(peerID: String) {

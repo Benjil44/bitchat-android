@@ -213,6 +213,128 @@ fun DebugSettingsSheet(
                 }
             }
 
+            // WiFi Direct diagnostics
+            item {
+                val wifiDirectEnabled = com.bitchat.android.wifidirect.WiFiDirectPreferences.isEnabled(context)
+                val wifiPermissions = com.bitchat.android.wifidirect.WiFiDirectPermissionManager(context).hasAllPermissions()
+                val wifiDirectService = meshService.wifiDirectService
+                val connectionInfo by wifiDirectService.connectionInfo.collectAsState()
+                val isConnected by wifiDirectService.isConnected.collectAsState()
+                val wifiPeers by wifiDirectService.peers.collectAsState()
+
+                Surface(shape = RoundedCornerShape(12.dp), color = colorScheme.surfaceVariant.copy(alpha = 0.2f)) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(Icons.Filled.Devices, contentDescription = null, tint = Color(0xFF00C851))
+                            Text("WiFi Direct", fontFamily = FontFamily.Monospace, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        }
+
+                        // Status row
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Status:", fontFamily = FontFamily.Monospace, fontSize = 12.sp, modifier = Modifier.width(80.dp))
+                            Text(
+                                when {
+                                    !wifiDirectEnabled -> "Disabled"
+                                    !wifiPermissions -> "Missing permissions"
+                                    isConnected -> "✅ Connected"
+                                    else -> "⚠️ Discovering..."
+                                },
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 12.sp,
+                                color = when {
+                                    !wifiDirectEnabled || !wifiPermissions -> colorScheme.error
+                                    isConnected -> Color(0xFF00C851)
+                                    else -> Color(0xFFFF9500)
+                                }
+                            )
+                        }
+
+                        // Role row (only if connected)
+                        if (connectionInfo != null) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Role:", fontFamily = FontFamily.Monospace, fontSize = 12.sp, modifier = Modifier.width(80.dp))
+                                Text(
+                                    if (connectionInfo!!.isGroupOwner) "🎯 Group Owner" else "📱 Client",
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 12.sp,
+                                    color = colorScheme.primary
+                                )
+                            }
+
+                            // Group owner address
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Address:", fontFamily = FontFamily.Monospace, fontSize = 12.sp, modifier = Modifier.width(80.dp))
+                                Text(
+                                    connectionInfo!!.groupOwnerAddress,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.sp,
+                                    color = colorScheme.onSurface.copy(alpha = 0.7f)
+                                )
+                            }
+                        }
+
+                        // Peer count
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Peers:", fontFamily = FontFamily.Monospace, fontSize = 12.sp, modifier = Modifier.width(80.dp))
+                            Text(
+                                "${wifiPeers.count { it.isConnected }} connected, ${wifiPeers.size} total",
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 12.sp,
+                                color = colorScheme.onSurface.copy(alpha = 0.9f)
+                            )
+                        }
+
+                        // Peer list (if any)
+                        if (wifiPeers.isNotEmpty()) {
+                            Text(
+                                "Discovered Devices:",
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = colorScheme.onSurface.copy(alpha = 0.8f)
+                            )
+                            wifiPeers.take(5).forEach { peer ->
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(start = 8.dp)
+                                ) {
+                                    Text(
+                                        if (peer.isConnected) "✓" else "·",
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 10.sp,
+                                        color = if (peer.isConnected) Color(0xFF00C851) else colorScheme.onSurface.copy(alpha = 0.5f),
+                                        modifier = Modifier.width(12.dp)
+                                    )
+                                    Text(
+                                        peer.deviceName,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 10.sp,
+                                        color = colorScheme.onSurface.copy(alpha = 0.7f),
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                            if (wifiPeers.size > 5) {
+                                Text(
+                                    "+ ${wifiPeers.size - 5} more",
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 10.sp,
+                                    color = colorScheme.onSurface.copy(alpha = 0.5f),
+                                    modifier = Modifier.padding(start = 20.dp)
+                                )
+                            }
+                        }
+
+                        Text(
+                            "100-200m range · Automatic failover",
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp,
+                            color = colorScheme.onSurface.copy(alpha = 0.6f)
+                        )
+                    }
+                }
+            }
+
             // Packet relay controls and stats
             item {
                 Surface(shape = RoundedCornerShape(12.dp), color = colorScheme.surfaceVariant.copy(alpha = 0.2f)) {

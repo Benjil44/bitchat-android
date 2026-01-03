@@ -15,22 +15,107 @@ import kotlin.random.Random
 /**
  * Handles processing of different message types
  * Extracted from BluetoothMeshService for better separation of concerns
+ *
+ * IRAN USE CASE: Integrated contact filtering to show only messages from trusted friends
  */
 class MessageHandler(private val myPeerID: String, private val appContext: android.content.Context) {
-    
+
     companion object {
         private const val TAG = "MessageHandler"
     }
-    
+
     // Delegate for callbacks
     var delegate: MessageHandlerDelegate? = null
-    
+
     // Reference to PacketProcessor for recursive packet handling
     var packetProcessor: PacketProcessor? = null
-    
+
     // Coroutines
     private val handlerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    
+
+    // Contact filtering for Iran use case
+    private val contactManager by lazy {
+        com.bitchat.android.contacts.ContactManager(appContext, handlerScope)
+    }
+
+    private val dataManager by lazy {
+        com.bitchat.android.ui.DataManager(appContext)
+    }
+
+    // MARK: - Contact Filtering (Iran Use Case)
+
+    /**
+     * Check if a message should be accepted based on contact filtering settings
+     *
+     * @param message The message to check
+     * @param peerID The sender's peer ID
+     * @return true if message should be shown, false if filtered out
+     */
+    private suspend fun shouldAcceptMessage(message: BitchatMessage, peerID: String): Boolean {
+        // Always accept system messages
+        if (message.sender == "system") return true
+
+        // Always accept our own messages
+        if (peerID == myPeerID) return true
+
+        // Check if contact filtering is enabled
+        val showContactsOnly = dataManager.isShowContactsOnly()
+        if (!showContactsOnly) {
+            // Filtering disabled - accept all messages
+            return true
+        }
+
+        // Check if sender is a contact
+        val isContact = contactManager.isContactByPeerID(peerID)
+
+        if (!isContact) {
+            Log.d(TAG, "🚫 Filtered message from non-contact: ${peerID.take(8)}... (${message.sender})")
+            return false
+        }
+
+        // Sender is a contact - accept message
+        Log.d(TAG, "✅ Accepted message from contact: ${peerID.take(8)}... (${message.sender})")
+        return true
+    }
+
+    /**
+     * Update contact stats after receiving a message
+     */
+    private fun updateContactStats(peerID: String) {
+        handlerScope.launch {
+            try {
+                val contact = contactManager.getContactByPeerID(peerID)
+                if (contact != null) {
+                    contactManager.incrementUnreadCount(contact.hashID)
+                    contactManager.updateLastMessage(contact.hashID)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to update contact stats: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Sync contact with mesh peer when they announce
+     */
+    private suspend fun syncContactWithPeer(
+        peerID: String,
+        noisePublicKey: ByteArray?,
+        signingPublicKey: ByteArray?,
+        nickname: String
+    ) {
+        if (noisePublicKey != null) {
+            contactManager.syncWithMeshPeer(
+                peerID = peerID,
+                noisePublicKey = noisePublicKey,
+                signingPublicKey = signingPublicKey,
+                displayName = nickname
+            )
+        }
+    }
+
+    // MARK: - Message Handling
+
     /**
      * Handle Noise encrypted transport message - SIMPLIFIED iOS-compatible version
      * Uses NoisePayloadType system exactly like iOS SimplifiedBluetoothService
@@ -102,11 +187,19 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
                             senderPeerID = peerID,
                             mentions = null // TODO: Parse mentions if needed
                         )
-                        
-                        // Notify delegate
-                        delegate?.onMessageReceived(message)
-                        
-                        // Send delivery ACK exactly like iOS
+
+                        // IRAN USE CASE: Contact filtering
+                        if (shouldAcceptMessage(message, peerID)) {
+                            // Notify delegate
+                            delegate?.onMessageReceived(message)
+
+                            // Update contact stats (unread count, last message time)
+                            updateContactStats(peerID)
+                        } else {
+                            Log.d(TAG, "Filtered out private message from non-contact")
+                        }
+
+                        // Send delivery ACK exactly like iOS (even if filtered - sender doesn't know)
                         sendDeliveryAck(privateMessage.messageID, peerID)
                     }
                 }
@@ -131,7 +224,20 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
                         )
 
                         Log.d(TAG, "📄 Saved encrypted incoming file to $savedPath (msgId=$uniqueMsgId)")
-                        delegate?.onMessageReceived(message)
+
+                        // IRAN USE CASE: Contact filtering for file transfers
+                        if (shouldAcceptMessage(message, peerID)) {
+                            delegate?.onMessageReceived(message)
+                            updateContactStats(peerID)
+                        } else {
+                            // Delete file if from non-contact (save space)
+                            try {
+                                java.io.File(savedPath).delete()
+                                Log.d(TAG, "Deleted file from non-contact")
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Failed to delete filtered file: ${e.message}")
+                            }
+                        }
 
                         // Send delivery ACK with generated message ID
                         sendDeliveryAck(uniqueMsgId, peerID)

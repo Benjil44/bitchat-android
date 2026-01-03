@@ -1,12 +1,15 @@
 package com.bitchat.android.ui
 
 import android.util.Log
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import com.bitchat.android.mesh.BluetoothMeshService
 import com.bitchat.android.model.BitchatFilePacket
 import com.bitchat.android.model.BitchatMessage
 import com.bitchat.android.model.BitchatMessageType
 import java.util.Date
 import java.security.MessageDigest
+import java.io.ByteArrayOutputStream
 
 /**
  * Handles media file sending operations (voice notes, images, generic files)
@@ -21,6 +24,11 @@ class MediaSendingManager(
     companion object {
         private const val TAG = "MediaSendingManager"
         private const val MAX_FILE_SIZE = com.bitchat.android.util.AppConstants.Media.MAX_FILE_SIZE_BYTES // 50MB limit
+
+        // Image compression settings
+        private const val MAX_IMAGE_WIDTH = 1920
+        private const val MAX_IMAGE_HEIGHT = 1080
+        private const val JPEG_QUALITY = 85 // 0-100, 85 is good balance between quality and size
     }
 
     // Track in-flight transfer progress: transferId -> messageId and reverse
@@ -72,18 +80,28 @@ class MediaSendingManager(
                 Log.e(TAG, "❌ File does not exist: $filePath")
                 return
             }
-            Log.d(TAG, "📁 File exists: size=${file.length()} bytes, name=${file.name}")
-            
-            if (file.length() > MAX_FILE_SIZE) {
-                Log.e(TAG, "❌ File too large: ${file.length()} bytes (max: $MAX_FILE_SIZE)")
+            Log.d(TAG, "📁 Original file: size=${file.length()} bytes, name=${file.name}")
+
+            // Compress image to reduce memory usage and transmission time
+            val compressedBytes = compressImage(filePath)
+            if (compressedBytes == null) {
+                Log.e(TAG, "❌ Failed to compress image: $filePath")
+                return
+            }
+
+            val compressionRatio = ((1.0 - compressedBytes.size.toDouble() / file.length()) * 100).toInt()
+            Log.d(TAG, "✅ Compressed: ${file.length()} → ${compressedBytes.size} bytes (${compressionRatio}% reduction)")
+
+            if (compressedBytes.size > MAX_FILE_SIZE) {
+                Log.e(TAG, "❌ Compressed image still too large: ${compressedBytes.size} bytes (max: $MAX_FILE_SIZE)")
                 return
             }
 
             val filePacket = BitchatFilePacket(
                 fileName = file.name,
-                fileSize = file.length(),
+                fileSize = compressedBytes.size.toLong(),
                 mimeType = "image/jpeg",
-                content = file.readBytes()
+                content = compressedBytes
             )
 
             if (toPeerIDOrNull != null) {
@@ -91,11 +109,85 @@ class MediaSendingManager(
             } else {
                 sendPublicFile(channelOrNull, filePacket, filePath, BitchatMessageType.Image)
             }
+        } catch (e: OutOfMemoryError) {
+            Log.e(TAG, "❌ OUT OF MEMORY: Image too large for device RAM", e)
+            Log.e(TAG, "❌ Image path: $filePath")
         } catch (e: Exception) {
             Log.e(TAG, "❌ CRITICAL: Image send failed completely", e)
             Log.e(TAG, "❌ Image path: $filePath")
             Log.e(TAG, "❌ Error details: ${e.message}")
             Log.e(TAG, "❌ Error type: ${e.javaClass.simpleName}")
+        }
+    }
+
+    /**
+     * Compress image to reduce memory usage and file size
+     * Resizes to max 1920x1080 and compresses to JPEG at 85% quality
+     */
+    private fun compressImage(filePath: String): ByteArray? {
+        try {
+            // First decode with inJustDecodeBounds to get dimensions without loading full image
+            val options = BitmapFactory.Options().apply {
+                inJustDecodeBounds = true
+            }
+            BitmapFactory.decodeFile(filePath, options)
+
+            val originalWidth = options.outWidth
+            val originalHeight = options.outHeight
+            Log.d(TAG, "Image dimensions: ${originalWidth}x${originalHeight}")
+
+            // Calculate sample size to reduce memory usage during decode
+            var inSampleSize = 1
+            if (originalWidth > MAX_IMAGE_WIDTH || originalHeight > MAX_IMAGE_HEIGHT) {
+                val halfWidth = originalWidth / 2
+                val halfHeight = originalHeight / 2
+
+                while ((halfWidth / inSampleSize) >= MAX_IMAGE_WIDTH &&
+                       (halfHeight / inSampleSize) >= MAX_IMAGE_HEIGHT) {
+                    inSampleSize *= 2
+                }
+            }
+
+            // Decode with sample size to reduce memory usage
+            val decodeOptions = BitmapFactory.Options().apply {
+                inSampleSize = inSampleSize
+            }
+            val bitmap = BitmapFactory.decodeFile(filePath, decodeOptions)
+                ?: return null
+
+            Log.d(TAG, "Decoded bitmap: ${bitmap.width}x${bitmap.height}, sample size: $inSampleSize")
+
+            // Calculate scaling factor to fit within max dimensions
+            val scaleFactor = minOf(
+                MAX_IMAGE_WIDTH.toFloat() / bitmap.width,
+                MAX_IMAGE_HEIGHT.toFloat() / bitmap.height,
+                1.0f // Don't upscale
+            )
+
+            val scaledBitmap = if (scaleFactor < 1.0f) {
+                val scaledWidth = (bitmap.width * scaleFactor).toInt()
+                val scaledHeight = (bitmap.height * scaleFactor).toInt()
+                Log.d(TAG, "Scaling to: ${scaledWidth}x${scaledHeight}")
+                Bitmap.createScaledBitmap(bitmap, scaledWidth, scaledHeight, true).also {
+                    bitmap.recycle() // Free original bitmap memory
+                }
+            } else {
+                bitmap
+            }
+
+            // Compress to JPEG
+            val outputStream = ByteArrayOutputStream()
+            scaledBitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, outputStream)
+            scaledBitmap.recycle() // Free scaled bitmap memory
+
+            return outputStream.toByteArray()
+
+        } catch (e: OutOfMemoryError) {
+            Log.e(TAG, "Out of memory during image compression", e)
+            return null
+        } catch (e: Exception) {
+            Log.e(TAG, "Error compressing image: ${e.message}", e)
+            return null
         }
     }
 

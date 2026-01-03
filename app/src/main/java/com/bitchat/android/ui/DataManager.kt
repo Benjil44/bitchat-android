@@ -284,8 +284,36 @@ class DataManager(private val context: Context) {
         Log.d(TAG, "Message retention set to $days days")
     }
 
+    // MARK: - Contact Filtering Settings
+
+    /**
+     * Whether to show only messages from contacts (filter out unknown senders)
+     * Default: true (recommended for Iran use case - reduce noise during protests)
+     */
+    fun isShowContactsOnly(): Boolean {
+        return prefs.getBoolean("show_contacts_only", true) // Default true for safety
+    }
+
+    fun setShowContactsOnly(enabled: Boolean) {
+        prefs.edit().putBoolean("show_contacts_only", enabled).apply()
+        Log.d(TAG, "Show contacts only: $enabled")
+    }
+
+    /**
+     * Whether to allow non-contacts to send friend requests
+     * Default: true
+     */
+    fun isAcceptFriendRequestsEnabled(): Boolean {
+        return prefs.getBoolean("accept_friend_requests", true)
+    }
+
+    fun setAcceptFriendRequests(enabled: Boolean) {
+        prefs.edit().putBoolean("accept_friend_requests", enabled).apply()
+        Log.d(TAG, "Accept friend requests: $enabled")
+    }
+
     // MARK: - Emergency Clear
-    
+
     fun clearAllData() {
         _channelCreators.clear()
         _favoritePeers.clear()

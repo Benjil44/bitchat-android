@@ -212,6 +212,18 @@ class MeshForegroundService : Service() {
         try {
             android.util.Log.d("MeshForegroundService", "Ensuring mesh service is started")
             meshService?.startServices()
+
+            // Enable WiFi Direct if user preference is set and permissions granted
+            val wifiDirectEnabled = com.bitchat.android.wifidirect.WiFiDirectPreferences.isEnabled(applicationContext)
+            if (wifiDirectEnabled) {
+                val hasWifiPermissions = meshService?.hasWiFiDirectPermissions() ?: false
+                if (hasWifiPermissions) {
+                    android.util.Log.d("MeshForegroundService", "Enabling WiFi Direct (100-200m range)")
+                    meshService?.setWiFiDirectEnabled(true)
+                } else {
+                    android.util.Log.w("MeshForegroundService", "WiFi Direct enabled in settings but missing permissions")
+                }
+            }
         } catch (e: Exception) {
             android.util.Log.e("MeshForegroundService", "Failed to start mesh service: ${e.message}")
         }

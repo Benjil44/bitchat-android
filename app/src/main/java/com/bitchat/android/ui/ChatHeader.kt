@@ -545,18 +545,33 @@ private fun MainHeader(
             modifier = Modifier.fillMaxHeight(),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // Settings icon button - positioned before BitChat text
+            IconButton(
+                onClick = onTitleClick,
+                modifier = Modifier.size(32.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Settings,
+                    contentDescription = "Settings",
+                    modifier = Modifier.size(20.dp),
+                    tint = colorScheme.primary.copy(alpha = 0.7f)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(4.dp))
+
             Text(
                 text = stringResource(R.string.app_brand),
                 style = MaterialTheme.typography.headlineSmall,
                 color = colorScheme.primary,
                 modifier = Modifier.singleOrTripleClickable(
-                    onSingleClick = onTitleClick,
+                    onSingleClick = { /* No action - settings icon handles this */ },
                     onTripleClick = onTripleTitleClick
                 )
             )
-            
-            Spacer(modifier = Modifier.width(2.dp))
-            
+
+            Spacer(modifier = Modifier.width(4.dp))
+
             NicknameEditor(
                 value = nickname,
                 onValueChange = onNicknameChange

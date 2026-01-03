@@ -16,7 +16,15 @@
     <!-- Location permission required for BLE scanning -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    
+
+    <!-- WiFi Direct permissions for extended range (100-200m) -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <!-- Android 13+ WiFi Direct permission -->
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation" />
+
     <!-- Notification permissions -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Foreground service and boot permissions for long-running background mesh -->
@@ -29,6 +37,9 @@
     
     <!-- Microphone for voice notes -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Camera for QR code scanning -->
+    <uses-permission android:name="android.permission.CAMERA" />
 
     <!-- Storage permissions for file sharing -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
@@ -45,6 +56,9 @@
     <!-- Hardware features -->
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
     <uses-feature android:name="android.hardware.bluetooth" android:required="true" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+    <uses-feature android:name="android.hardware.wifi.direct" android:required="false" />
 
     <application
         android:name=".BitchatApplication"

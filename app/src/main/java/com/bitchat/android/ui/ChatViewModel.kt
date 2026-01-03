@@ -57,7 +57,7 @@ class ChatViewModel(
 
     // Specialized managers
     private val dataManager = DataManager(application.applicationContext)
-    private val messageManager = MessageManager(state)
+    private val messageManager = MessageManager(state, application.applicationContext)
     private val channelManager = ChannelManager(state, messageManager, dataManager, viewModelScope)
 
     // Create Noise session delegate for clean dependency injection
@@ -778,7 +778,20 @@ class ChatViewModel(
         
         // Clear all notifications
         notificationManager.clearAllNotifications()
-        
+
+        // Clear persistent message database (if storage enabled)
+        try {
+            val messageRepo = com.bitchat.android.data.repository.MessageRepository.getInstance(getApplication())
+            viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                messageRepo.deleteAllMessages()
+            }
+            // Also disable persistent storage to prevent re-saving
+            com.bitchat.android.data.StoragePreferences.setEnabled(getApplication(), false)
+            Log.d(TAG, "✅ Cleared persistent message database and disabled storage")
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error clearing persistent database: ${e.message}")
+        }
+
         // Clear Nostr/geohash state, keys, connections, bookmarks, and reinitialize from scratch
         try {
             // Clear geohash bookmarks too (panic should remove everything)

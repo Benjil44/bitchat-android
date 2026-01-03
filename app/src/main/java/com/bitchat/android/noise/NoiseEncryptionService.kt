@@ -4,7 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.bitchat.android.identity.SecureIdentityStateManager
 import com.bitchat.android.mesh.PeerFingerprintManager
-import com.bitchat.android.noise.southernstorm.protocol.Noise
+// Removed unused import: import com.bitchat.android.noise.southernstorm.protocol.Noise
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
@@ -317,25 +317,29 @@ class NoiseEncryptionService(private val context: Context) {
     // MARK: - Private Helpers
     
     /**
-     * Generate a new Curve25519 key pair using the real Noise library
+     * Generate a new Curve25519 key pair using Android's built-in X25519
      * Returns (privateKey, publicKey) as 32-byte arrays
+     *
+     * Note: Replaced southernstorm library with Android's native X25519 (API 26+)
      */
     private fun generateKeyPair(): Pair<ByteArray, ByteArray> {
         try {
-            val dhState = com.bitchat.android.noise.southernstorm.protocol.Noise.createDH("25519")
-            dhState.generateKeyPair()
-            
-            val privateKey = ByteArray(32)
-            val publicKey = ByteArray(32)
-            
-            dhState.getPrivateKey(privateKey, 0)
-            dhState.getPublicKey(publicKey, 0)
-            
-            dhState.destroy()
-            
+            // Use Android's built-in X25519 KeyPairGenerator (available since API 26)
+            val keyPairGenerator = java.security.KeyPairGenerator.getInstance("X25519")
+            val keyPair = keyPairGenerator.generateKeyPair()
+
+            // Extract raw key bytes
+            val privateKeyBytes = keyPair.private.encoded
+            val publicKeyBytes = keyPair.public.encoded
+
+            // X25519 keys are 32 bytes, but encoded format includes headers
+            // Extract the actual 32-byte key material (last 32 bytes for both)
+            val privateKey = privateKeyBytes.takeLast(32).toByteArray()
+            val publicKey = publicKeyBytes.takeLast(32).toByteArray()
+
             return Pair(privateKey, publicKey)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to generate key pair: ${e.message}")
+            Log.e(TAG, "Failed to generate X25519 key pair: ${e.message}")
             throw e
         }
     }

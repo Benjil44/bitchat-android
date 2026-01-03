@@ -50,7 +50,8 @@ class MainActivity : OrientationAwareActivity() {
     private lateinit var bluetoothStatusManager: BluetoothStatusManager
     private lateinit var locationStatusManager: LocationStatusManager
     private lateinit var batteryOptimizationManager: BatteryOptimizationManager
-    
+    private lateinit var wifiDirectPermissionManager: com.bitchat.android.wifidirect.WiFiDirectPermissionManager
+
     // Core mesh service - provided by the foreground service holder
     private lateinit var meshService: BluetoothMeshService
     private val mainViewModel: MainViewModel by viewModels()
@@ -99,6 +100,7 @@ class MainActivity : OrientationAwareActivity() {
             onBatteryOptimizationDisabled = ::handleBatteryOptimizationDisabled,
             onBatteryOptimizationFailed = ::handleBatteryOptimizationFailed
         )
+        wifiDirectPermissionManager = com.bitchat.android.wifidirect.WiFiDirectPermissionManager(this)
         onboardingCoordinator = OnboardingCoordinator(
             activity = this,
             permissionManager = permissionManager,
@@ -755,10 +757,49 @@ class MainActivity : OrientationAwareActivity() {
         }
     }
 
-    
+    /**
+     * Request WiFi Direct permissions
+     * Called from AboutSheet when user enables WiFi Direct toggle
+     */
+    fun requestWiFiDirectPermissions() {
+        Log.d("MainActivity", "Requesting WiFi Direct permissions")
+        wifiDirectPermissionManager.requestPermissions(this)
+    }
+
+    /**
+     * Handle permission request results
+     */
+    @Deprecated("Deprecated in Java")
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+
+        // Handle WiFi Direct permission results
+        if (requestCode == com.bitchat.android.wifidirect.WiFiDirectPermissionManager.WIFI_DIRECT_PERMISSION_REQUEST_CODE) {
+            @Suppress("UNCHECKED_CAST")
+            val allGranted = wifiDirectPermissionManager.handlePermissionResult(
+                requestCode,
+                permissions as Array<out String>,
+                grantResults
+            )
+
+            if (allGranted) {
+                Log.i("MainActivity", "WiFi Direct permissions granted, WiFi Direct service will start automatically")
+                // WiFi Direct service is managed by MeshForegroundService
+                // It will automatically start when permissions are detected
+            } else {
+                Log.w("MainActivity", "WiFi Direct permissions denied, WiFi Direct will not be available")
+                // User denied permissions, WiFi Direct toggle will show warning state
+            }
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
-        
+
         // Cleanup location status manager
         try {
             locationStatusManager.cleanup()
@@ -766,7 +807,7 @@ class MainActivity : OrientationAwareActivity() {
         } catch (e: Exception) {
             Log.w("MainActivity", "Error cleaning up location status manager: ${e.message}")
         }
-        
+
         // Do not stop mesh here; ForegroundService owns lifecycle for background reliability
     }
 }

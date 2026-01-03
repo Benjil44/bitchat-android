@@ -367,7 +367,7 @@ fun ChatScreen(viewModel: ChatViewModel) {
         showLocationNotesSheet = showLocationNotesSheet,
         onLocationNotesSheetDismiss = { showLocationNotesSheet = false },
         showUserSheet = showUserSheet,
-        onUserSheetDismiss = { 
+        onUserSheetDismiss = {
             showUserSheet = false
             selectedMessageForSheet = null // Reset message when dismissing
         },
@@ -527,10 +527,26 @@ private fun ChatDialogs(
 
     // About sheet
     var showDebugSheet by remember { mutableStateOf(false) }
+    var showContactList by remember { mutableStateOf(false) }
+    var showAddFriend by remember { mutableStateOf(false) }
+    var showMyQRCode by remember { mutableStateOf(false) }
+
     AboutSheet(
         isPresented = showAppInfo,
         onDismiss = onAppInfoDismiss,
-        onShowDebug = { showDebugSheet = true }
+        onShowDebug = { showDebugSheet = true },
+        onShowContactList = {
+            viewModel.hideAppInfo()
+            showContactList = true
+        },
+        onShowAddFriend = {
+            viewModel.hideAppInfo()
+            showAddFriend = true
+        },
+        onShowMyQRCode = {
+            viewModel.hideAppInfo()
+            showMyQRCode = true
+        }
     )
     if (showDebugSheet) {
         com.bitchat.android.ui.debug.DebugSettingsSheet(
@@ -565,6 +581,87 @@ private fun ChatDialogs(
             targetNickname = selectedUserForSheet,
             selectedMessage = selectedMessageForSheet,
             viewModel = viewModel
+        )
+    }
+
+    // Contact screens - modal bottom sheets
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+
+    // Contact List Screen
+    if (showContactList) {
+        androidx.compose.material3.ModalBottomSheet(
+            onDismissRequest = { showContactList = false }
+        ) {
+            val contactManager = remember {
+                try {
+                    com.bitchat.android.contacts.ContactManager(context.applicationContext, scope)
+                } catch (e: Exception) {
+                    android.util.Log.e("ChatScreen", "Failed to create ContactManager", e)
+                    null
+                }
+            }
+
+            if (contactManager != null) {
+                com.bitchat.android.ui.contacts.ContactListScreen(
+                    contactManager = contactManager,
+                    onContactClick = { contact ->
+                        // Open private chat with this contact
+                        contact.currentPeerID?.let { peerID ->
+                            viewModel.startPrivateChat(peerID)
+                            showContactList = false
+                        }
+                    },
+                    onAddFriendClick = {
+                        showContactList = false
+                        showAddFriend = true
+                    },
+                    onMyQRCodeClick = {
+                        showContactList = false
+                        showMyQRCode = true
+                    },
+                    scope = scope
+                )
+            } else {
+                // Show error if ContactManager failed to initialize
+                androidx.compose.foundation.layout.Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(64.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    androidx.compose.material3.Text(
+                        "Error: Could not load contacts",
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.error,
+                        style = androidx.compose.material3.MaterialTheme.typography.bodyLarge
+                    )
+                }
+            }
+        }
+    }
+
+    // Add Friend Screen - NEW: Scans full contact data (Noise + signing keys)
+    // Only show when contact list and settings are not visible to prevent z-index issues
+    if (showAddFriend && !showContactList && !showAppInfo) {
+        QRScannerScreen(
+            onContactAdded = { contact ->
+                // Contact already saved by QRScannerScreen
+                android.widget.Toast.makeText(
+                    context,
+                    "✅ Contact added: ${contact.displayName}",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+                showAddFriend = false
+            },
+            onClose = { showAddFriend = false }
+        )
+    }
+
+    // My QR Code Screen - NEW: Shows full contact data (Noise + signing keys)
+    // Only show when contact list and settings are not visible to prevent z-index issues
+    if (showMyQRCode && !showContactList && !showAppInfo) {
+        QRDisplaySheet(
+            onDismiss = { showMyQRCode = false }
         )
     }
 }
