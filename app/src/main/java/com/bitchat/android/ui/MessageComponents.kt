@@ -109,7 +109,10 @@ fun MessagesList(
             listState.animateScrollToItem(0)
         }
     }
-    
+
+    // Cache reversed messages to avoid recreating list on every recomposition
+    val reversedMessages = remember(messages) { messages.asReversed() }
+
     LazyColumn(
         state = listState,
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
@@ -118,7 +121,7 @@ fun MessagesList(
         reverseLayout = true
     ) {
         items(
-            items = messages.asReversed(),
+            items = reversedMessages,
             key = { it.id }
         ) { message ->
                 MessageItem(
