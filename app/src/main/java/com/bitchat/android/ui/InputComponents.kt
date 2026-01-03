@@ -37,6 +37,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.style.TextDirection
 import com.bitchat.android.ui.theme.BASE_FONT_SIZE
 import com.bitchat.android.features.voice.normalizeAmplitudeSample
 import com.bitchat.android.features.voice.AudioWaveformExtractor
@@ -197,11 +198,12 @@ fun MessageInput(
                 onValueChange = onValueChange,
                 textStyle = MaterialTheme.typography.bodyMedium.copy(
                     color = colorScheme.primary,
-                    fontFamily = FontFamily.Monospace
+                    fontFamily = FontFamily.Monospace,
+                    textDirection = TextDirection.Content // Auto-detect RTL for Persian/Arabic
                 ),
                 cursorBrush = SolidColor(if (isRecording) Color.Transparent else colorScheme.primary),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { 
+                keyboardActions = KeyboardActions(onSend = {
                     if (hasText) onSend() // Only send if there's text
                 }),
                 visualTransformation = CombinedVisualTransformation(
