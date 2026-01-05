@@ -178,7 +178,24 @@ class MessageManager(
             android.util.Log.d("MessageManager", "✅ Loaded ${messages.size} persisted messages for $peerID")
         }
     }
-    
+
+    /**
+     * Search messages across all conversations or within a specific conversation
+     * Returns list of (peerID, message) pairs
+     */
+    suspend fun searchMessages(query: String, peerID: String? = null): List<Pair<String, BitchatMessage>> {
+        if (context == null || !StoragePreferences.isEnabled(context) || query.length < 2) {
+            return emptyList()
+        }
+
+        return try {
+            messageRepository?.searchMessages(query, peerID) ?: emptyList()
+        } catch (e: Exception) {
+            android.util.Log.e("MessageManager", "Search failed: ${e.message}")
+            emptyList()
+        }
+    }
+
     fun clearPrivateMessages(peerID: String) {
         val updatedChats = state.getPrivateChatsValue().toMutableMap()
         updatedChats[peerID] = emptyList()

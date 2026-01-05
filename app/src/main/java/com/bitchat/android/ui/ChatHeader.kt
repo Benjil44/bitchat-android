@@ -241,7 +241,8 @@ fun ChatHeaderContent(
     onTripleClick: () -> Unit,
     onShowAppInfo: () -> Unit,
     onLocationChannelsClick: () -> Unit,
-    onLocationNotesClick: () -> Unit
+    onLocationNotesClick: () -> Unit,
+    onSearchClick: () -> Unit
 ) {
     val colorScheme = MaterialTheme.colorScheme
 
@@ -298,6 +299,7 @@ fun ChatHeaderContent(
                 onSidebarClick = onSidebarClick,
                 onLocationChannelsClick = onLocationChannelsClick,
                 onLocationNotesClick = onLocationNotesClick,
+                onSearchClick = onSearchClick,
                 viewModel = viewModel
             )
         }
@@ -520,6 +522,7 @@ private fun MainHeader(
     onSidebarClick: () -> Unit,
     onLocationChannelsClick: () -> Unit,
     onLocationNotesClick: () -> Unit,
+    onSearchClick: () -> Unit,
     viewModel: ChatViewModel
 ) {
     val colorScheme = MaterialTheme.colorScheme
@@ -583,6 +586,24 @@ private fun MainHeader(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(5.dp)
         ) {
+
+            // Search button (only show if message persistence enabled)
+            val context = androidx.compose.ui.platform.LocalContext.current
+            val persistenceEnabled = remember { com.bitchat.android.data.StoragePreferences.isEnabled(context) }
+
+            if (persistenceEnabled) {
+                IconButton(
+                    onClick = onSearchClick,
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Search,
+                        contentDescription = "Search Messages",
+                        modifier = Modifier.size(16.dp),
+                        tint = colorScheme.primary.copy(alpha = 0.7f)
+                    )
+                }
+            }
 
             // Unread private messages badge (click to open most recent DM)
             if (hasUnreadPrivateMessages.isNotEmpty()) {

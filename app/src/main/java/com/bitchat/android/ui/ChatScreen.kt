@@ -64,6 +64,7 @@ fun ChatScreen(viewModel: ChatViewModel) {
     var passwordInput by remember { mutableStateOf("") }
     var showLocationChannelsSheet by remember { mutableStateOf(false) }
     var showLocationNotesSheet by remember { mutableStateOf(false) }
+    var showSearchSheet by remember { mutableStateOf(false) }
     var showUserSheet by remember { mutableStateOf(false) }
     var selectedUserForSheet by remember { mutableStateOf("") }
     var selectedMessageForSheet by remember { mutableStateOf<BitchatMessage?>(null) }
@@ -251,7 +252,8 @@ fun ChatScreen(viewModel: ChatViewModel) {
             onShowAppInfo = { viewModel.showAppInfo() },
             onPanicClear = { viewModel.panicClearAllData() },
             onLocationChannelsClick = { showLocationChannelsSheet = true },
-            onLocationNotesClick = { showLocationNotesSheet = true }
+            onLocationNotesClick = { showLocationNotesSheet = true },
+            onSearchClick = { showSearchSheet = true }
         )
 
         // Divider under header - positioned after status bar + header height
@@ -373,6 +375,8 @@ fun ChatScreen(viewModel: ChatViewModel) {
         },
         selectedUserForSheet = selectedUserForSheet,
         selectedMessageForSheet = selectedMessageForSheet,
+        showSearchSheet = showSearchSheet,
+        onSearchSheetDismiss = { showSearchSheet = false },
         viewModel = viewModel
     )
 }
@@ -450,7 +454,8 @@ private fun ChatFloatingHeader(
     onShowAppInfo: () -> Unit,
     onPanicClear: () -> Unit,
     onLocationChannelsClick: () -> Unit,
-    onLocationNotesClick: () -> Unit
+    onLocationNotesClick: () -> Unit,
+    onSearchClick: () -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val locationManager = remember { com.bitchat.android.geohash.LocationChannelManager.getInstance(context) }
@@ -483,7 +488,8 @@ private fun ChatFloatingHeader(
                         // Ensure location is loaded before showing sheet
                         locationManager.refreshChannels()
                         onLocationNotesClick()
-                    }
+                    },
+                    onSearchClick = onSearchClick
                 )
             },
             colors = TopAppBarDefaults.topAppBarColors(
@@ -509,6 +515,8 @@ private fun ChatDialogs(
     onLocationChannelsSheetDismiss: () -> Unit,
     showLocationNotesSheet: Boolean,
     onLocationNotesSheetDismiss: () -> Unit,
+    showSearchSheet: Boolean,
+    onSearchSheetDismiss: () -> Unit,
     showUserSheet: Boolean,
     onUserSheetDismiss: () -> Unit,
     selectedUserForSheet: String,
@@ -580,6 +588,20 @@ private fun ChatDialogs(
             onDismiss = onUserSheetDismiss,
             targetNickname = selectedUserForSheet,
             selectedMessage = selectedMessageForSheet,
+            viewModel = viewModel
+        )
+    }
+
+    // Message search sheet
+    if (showSearchSheet) {
+        MessageSearchSheet(
+            isPresented = showSearchSheet,
+            onDismiss = onSearchSheetDismiss,
+            onMessageClick = { peerID, message ->
+                // Open private chat and scroll to message
+                viewModel.startPrivateChat(peerID)
+                // TODO: Add scroll to specific message functionality
+            },
             viewModel = viewModel
         )
     }

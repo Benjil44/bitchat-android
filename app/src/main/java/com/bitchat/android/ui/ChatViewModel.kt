@@ -363,6 +363,14 @@ class ChatViewModel(
         clearMeshMentionNotifications()
     }
 
+    /**
+     * Search messages across all conversations or within a specific conversation
+     * Returns list of (peerID, message) pairs
+     */
+    suspend fun searchMessages(query: String, peerID: String? = null): List<Pair<String, BitchatMessage>> {
+        return messageManager.searchMessages(query, peerID)
+    }
+
     // MARK: - Open Latest Unread Private Chat
 
     fun openLatestUnreadPrivateChat() {

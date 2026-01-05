@@ -150,13 +150,15 @@ class MessageRepository(private val context: Context) {
      * Search messages by content
      * @param query Search query
      * @param peerID Optional peer ID to limit search to specific conversation
-     * @return List of matching messages
+     * @return List of pairs (peerID, message) for matching messages
      */
-    suspend fun searchMessages(query: String, peerID: String? = null): List<BitchatMessage> {
+    suspend fun searchMessages(query: String, peerID: String? = null): List<Pair<String, BitchatMessage>> {
         return withContext(Dispatchers.IO) {
             try {
                 val entities = dao.searchMessages(query, peerID)
-                entities.map { it.toBitchatMessage() }
+                entities.map { entity ->
+                    entity.peerID to entity.toBitchatMessage()
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to search messages: ${e.message}")
                 emptyList()

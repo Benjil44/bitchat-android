@@ -406,8 +406,11 @@ class BluetoothGattClientManager(
                         }
                     } else {
                         Log.d(TAG, "Client: Cleanly disconnected from $deviceAddress")
-                        connectionTracker.cleanupDeviceConnection(deviceAddress)
                     }
+
+                    // CRITICAL: Always clean up connection state (regardless of disconnect reason)
+                    // This ensures device can reconnect when it comes back in range
+                    connectionTracker.cleanupDeviceConnection(deviceAddress)
 
                     // Notify higher layers about device disconnection to update direct flags
                     delegate?.onDeviceDisconnected(gatt.device)

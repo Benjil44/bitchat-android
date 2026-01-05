@@ -285,7 +285,9 @@ class BluetoothConnectionTracker(
             addressPeerMap.remove(deviceAddress)
         }
         firstAnnounceSeen.remove(deviceAddress)
-        Log.d(TAG, "Cleaned up device connection for $deviceAddress")
+        // CRITICAL: Clear pending connection state to allow reconnection when device comes back in range
+        pendingConnections.remove(deviceAddress)
+        Log.d(TAG, "Cleaned up device connection for $deviceAddress (including pending state)")
     }
     
     /**

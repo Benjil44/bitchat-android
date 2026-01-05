@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./gradlew assembleDebug:*)",
+      "Bash(adb devices:*)",
+      "Bash(adb kill-server:*)",
+      "Bash(adb start-server:*)",
+      "Bash(ls:*)",
+      "Bash(./gradlew installDebug:*)",
+      "Bash(where:*)",
+      "Bash(adb version:*)",
+      "Bash(git add -A)"
+    ]
+  }
+}
